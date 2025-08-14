@@ -1,0 +1,247 @@
+---
+alwaysApply: false
+---
+## 3. 🎯 현재 작업 컨텍스트 (Current Working Context)
+
+### 3.1. 현재 작업 경로 및 초점
+- **현재 개발 초점은 `Speech Evaluation Service` 입니다.**
+- 이 서비스는 사용자가 AI와 실시간으로 음성 대화를 주고받는 핵심 기능을 담당합니다. 따라서 코드 생성 시 실시간성, 비동기 처리, 외부 API 연동에 대한 깊은 이해가 필요합니다.
+
+### 3.2. Speech Evaluation Service 상세 명세
+
+#### 핵심 역할
+- 사용자의 음성을 인식하고, AI와의 롤플레잉 대화 및 발음/문법에 대한 정밀 평가를 담당합니다.
+
+#### 주요 기능 플로우 (대화 1턴 기준)
+1.  **[API 수신]** 클라이언트로부터 `sessionId`와 사용자의 음성 파일(`audio`)을 `POST /.../{sessionId}/talk` 엔드포인트로 받습니다.
+2.  **[음성 → 텍스트]** 수신한 음성 파일을 **Whisper API**로 보내 텍스트로 변환합니다.
+3.  **[상태 조회]** `sessionId`를 이용해 **Redis**에서 이전 대화 내역(Chat History)을 불러옵니다.
+4.  **[AI 응답 생성]** 이전 대화 내역에 방금 변환된 사용자 텍스트를 추가하여, 전체 문맥을 **ChatCompletion API**로 보내 AI의 다음 응답(텍스트)을 생성합니다.
+5.  **[텍스트 → 음성]** 생성된 AI의 텍스트 응답을 **TTS API**로 보내 음성 파일로 변환합니다.
+6.  **[상태 업데이트]** 최신 대화 내역(사용자 발화 + AI 응답)을 **Redis**에 다시 저장하여 세션을 갱신합니다.
+7.  **[API 응답]** 변환된 AI의 음성 파일을 클라이언트에 반환합니다.
+8.  **[비동기 평가]** (위 과정과 별개로) 변환된 사용자 텍스트를 "평가" 목적의 프롬프트와 함께 **ChatCompletion API**에 보내 상세 피드백을 생성합니다.
+9.  **[이벤트 발행]** 생성된 평가 결과를 **"음성 평가 완료" 이벤트**로 만들어 **Kafka**에 발행합니다. (`Learning Management Service`가 이 이벤트를 구독하여 결과를 저장)
+
+#### 연동 시스템
+- **Redis:** 실시간 대화 내역 임시 저장
+- **OpenAI API:** Whisper (STT), ChatCompletion (대화 생성 및 평가)
+- **TTS API:** AI 응답을 음성으로 변환
+- **Kafka (발행자):** 평가 완료 이벤트를 다른 서비스에 전파
+
+#### 주요 API 엔드포인트
+- `POST /api/v1/sessions/role-playing`: 새로운 롤플레잉 세션을 **시작**
+- `POST /api/v1/sessions/role-playing/{sessionId}/talk`: 기존 세션에서 대화를 **진행**
+
+# English Compass Database Schema
+
+## 데이터베이스 구조 개요
+마이크로서비스 아키텍처 기반의 영어 학습 플랫폼 데이터베이스
+
+## 테이블 구조
+
+### 1. 사용자 관련 테이블
+
+#### user (사용자)
+- `id` (BIGINT, PK): 식별자
+- `name` (VARCHAR(255)): 사용자명
+- `kakao_id` (BIGINT): 카카오 ID (고유 식별자)
+- `profile` (VARCHAR(255)): 프로필 사진 URL
+- `prefer_category` (VARCHAR(255)): 관심 분야
+- `level` (VARCHAR(10)): 사용자 수준 (A1, A2, B1, B2, C1, C2)
+- `created_at`, `updated_at` (TIMESTAMP): 생성/수정일자
+
+#### user_session (사용자 세션)
+- `id` (BIGINT, PK): 세션 식별자
+- `user_id` (BIGINT, FK → user.id): 사용자 ID
+- `session_token` (VARCHAR(255)): 세션 토큰
+- `is_active` (BOOLEAN): 활성 상태
+- `expires_at` (TIMESTAMP): 만료 시간
+- `created_at`, `updated_at` (TIMESTAMP): 생성/수정일자
+
+### 2. 퀴즈 및 학습 콘텐츠 테이블
+
+#### quiz_category (퀴즈 카테고리)
+- `id` (BIGINT, PK): 카테고리 식별자
+- `name` (VARCHAR(100)): 카테고리명
+- `parent_id` (BIGINT, FK → quiz_category.id): 상위 카테고리 ID
+- `difficulty_level` (VARCHAR(10)): 난이도 레벨
+- `description` (TEXT): 카테고리 설명
+- `created_at` (TIMESTAMP): 생성일자
+
+#### quiz (퀴즈)
+- `id` (BIGINT, PK): 식별자
+- `category_id` (BIGINT, FK → quiz_category.id): 카테고리 ID
+- `question` (TEXT): 문제
+- `answer` (TEXT): 정답
+- `difficulty_level` (VARCHAR(10)): 난이도 레벨
+- `keyword` (VARCHAR(500)): 키워드 (쉼표 구분)
+- `question_type` (VARCHAR(50)): 문제 유형 (definition, fill_blanks, synonym)
+- `created_at`, `updated_at` (TIMESTAMP): 생성/수정일자
+
+#### quiz_options (퀴즈 보기)
+- `id` (BIGINT, PK): 보기 식별자
+- `quiz_id` (BIGINT, FK → quiz.id): 퀴즈 ID
+- `option_text` (TEXT): 보기 내용
+- `option_order` (BIGINT): 보기 순서
+- `is_correct` (BOOLEAN): 정답 여부
+- `created_at` (TIMESTAMP): 생성일자
+
+### 3. 학습 진행 및 이력 테이블
+
+#### learning_session (학습 세션)
+- `id` (BIGINT, PK): 세션 식별자
+- `user_id` (BIGINT, FK → user.id): 사용자 ID
+- `session_name` (VARCHAR(255)): 세션명
+- `start_time` (TIMESTAMP): 시작 시간
+- `end_time` (TIMESTAMP): 종료 시간
+- `total_quizzes` (BIGINT): 총 퀴즈 수
+- `correct_answers` (BIGINT): 정답 수
+- `session_score` (DECIMAL(5,2)): 세션 점수
+- `created_at` (TIMESTAMP): 생성일자
+
+#### quiz_log (사용자 퀴즈 기록)
+- `id` (BIGINT, PK): 로그 식별자
+- `user_id` (BIGINT, FK → user.id): 사용자 ID
+- `quiz_id` (BIGINT, FK → quiz.id): 퀴즈 ID
+- `session_id` (BIGINT, FK → learning_session.id): 학습 세션 ID
+- `is_correct` (BOOLEAN): 정답 여부
+- `user_answer` (TEXT): 사용자가 제출한 답변
+- `time_spent` (BIGINT): 소요 시간 (초)
+- `created_at`, `updated_at` (TIMESTAMP): 생성/수정일자
+
+### 4. 어휘 및 문장 테이블
+
+#### word (어휘)
+- `id` (BIGINT, PK): 식별자
+- `word` (VARCHAR(100)): 어휘
+- `definition` (TEXT): 정의
+- `example` (TEXT): 예문
+- `difficulty_level` (VARCHAR(10)): 난이도 레벨
+- `category` (VARCHAR(100)): 카테고리
+- `keyword` (VARCHAR(500)): 키워드 (쉼표 구분)
+- `created_at`, `updated_at` (TIMESTAMP): 생성/수정일자
+
+#### word_log (사용자 어휘 기록)
+- `user_id` (BIGINT, PK, FK → user.id): 사용자 ID
+- `word_id` (BIGINT, PK, FK → word.id): 어휘 ID
+- `mastery_level` (BIGINT): 숙련도 레벨 (0-5)
+- `review_count` (BIGINT): 복습 횟수
+- `next_review_date` (DATE): 다음 복습 날짜
+- `created_at`, `updated_at` (TIMESTAMP): 생성/수정일자
+
+#### sentence (문장)
+- `id` (BIGINT, PK): 식별자
+- `category` (VARCHAR(100)): 분류
+- `sentence` (TEXT): 문장
+- `translation` (TEXT): 해석
+- `difficulty_level` (VARCHAR(10)): 난이도 레벨
+- `keyword` (VARCHAR(500)): 키워드 (쉼표 구분)
+- `created_at`, `updated_at` (TIMESTAMP): 생성/수정일자
+
+### 5. 음성 평가 관련 테이블
+
+#### speech_session (음성 평가 세션)
+- `id` (BIGINT, PK): 세션 식별자
+- `user_id` (BIGINT, FK → user.id): 사용자 ID
+- `session_type` (VARCHAR(50)): 세션 유형 (roleplay, pronunciation, grammar)
+- `start_time` (TIMESTAMP): 시작 시간
+- `end_time` (TIMESTAMP): 종료 시간
+- `total_score` (DECIMAL(5,2)): 총점
+- `created_at` (TIMESTAMP): 생성일자
+
+#### speech_evaluation (음성 평가 결과)
+- `id` (BIGINT, PK): 평가 식별자
+- `speech_session_id` (BIGINT, FK → speech_session.id): 음성 세션 ID
+- `audio_url` (VARCHAR(255)): 음성 파일 URL
+- `pronunciation_score` (DECIMAL(3,2)): 발음 점수 (0.00-1.00)
+- `grammar_score` (DECIMAL(3,2)): 문법 점수 (0.00-1.00)
+- `fluency_score` (DECIMAL(3,2)): 유창성 점수 (0.00-1.00)
+- `feedback` (TEXT): 피드백
+- `ai_analysis` (JSON): AI 분석 결과
+- `created_at` (TIMESTAMP): 생성일자
+
+### 6. 미디어 콘텐츠 추천 테이블
+
+#### media_content (미디어 콘텐츠)
+- `id` (BIGINT, PK): 콘텐츠 식별자
+- `content_type` (VARCHAR(50)): 콘텐츠 유형 (video, podcast, movie, drama)
+- `title` (VARCHAR(255)): 제목
+- `description` (TEXT): 설명
+- `url` (VARCHAR(255)): URL
+- `thumbnail_url` (VARCHAR(255)): 썸네일 URL
+- `duration` (BIGINT): 재생 시간 (초)
+- `difficulty_level` (VARCHAR(10)): 난이도 레벨
+- `category` (VARCHAR(100)): 카테고리
+- `keyword` (VARCHAR(500)): 키워드 (쉼표 구분)
+- `view_count` (BIGINT): 조회수
+- `rating` (DECIMAL(3,2)): 평점 (0.00-5.00)
+- `created_at`, `updated_at` (TIMESTAMP): 생성/수정일자
+
+#### user_media_preference (사용자 미디어 선호도)
+- `id` (BIGINT, PK): 선호도 식별자
+- `user_id` (BIGINT, FK → user.id): 사용자 ID
+- `content_type` (VARCHAR(50)): 콘텐츠 유형
+- `category` (VARCHAR(100)): 카테고리
+- `preference_score` (DECIMAL(3,2)): 선호도 점수 (0.00-1.00)
+- `created_at`, `updated_at` (TIMESTAMP): 생성/수정일자
+
+### 7. 사용자 행동 추적 및 분석 테이블
+
+#### user_behavior_log (사용자 행동 로그)
+- `id` (BIGINT, PK): 로그 식별자
+- `user_id` (BIGINT, FK → user.id): 사용자 ID
+- `behavior_type` (VARCHAR(100)): 행동 유형 (quiz_start, quiz_complete, video_watch, etc.)
+- `target_id` (BIGINT): 대상 ID (퀴즈 ID, 비디오 ID 등)
+- `target_type` (VARCHAR(50)): 대상 유형 (quiz, video, podcast, etc.)
+- `metadata` (JSON): 추가 메타데이터
+- `created_at` (TIMESTAMP): 발생 시간
+
+#### learning_analytics (학습 분석 데이터)
+- `id` (BIGINT, PK): 분석 식별자
+- `user_id` (BIGINT, FK → user.id): 사용자 ID
+- `date` (DATE): 분석 날짜
+- `total_study_time` (BIGINT): 총 학습 시간 (분)
+- `quizzes_completed` (BIGINT): 완료한 퀴즈 수
+- `correct_rate` (DECIMAL(5,2)): 정답률
+- `words_learned` (BIGINT): 학습한 단어 수
+- `speech_practice_time` (BIGINT): 음성 연습 시간 (분)
+- `created_at`, `updated_at` (TIMESTAMP): 생성/수정일자
+
+#### recommendation_log (추천 시스템 로그)
+- `id` (BIGINT, PK): 로그 식별자
+- `user_id` (BIGINT, FK → user.id): 사용자 ID
+- `recommendation_type` (VARCHAR(50)): 추천 유형 (quiz, video, word, etc.)
+- `recommended_id` (BIGINT): 추천된 콘텐츠 ID
+- `user_action` (VARCHAR(50)): 사용자 행동 (accept, reject, ignore)
+- `score` (DECIMAL(3,2)): 추천 점수
+- `created_at` (TIMESTAMP): 생성일자
+
+### 8. API 키 관리
+
+#### key_table (API 키 테이블)
+- `id` (INT, PK): 식별자
+- `key_name` (VARCHAR(255)): 키 이름
+- `usage_limit` (INT): 사용량 제한
+
+#### key_usage_log (API 키 별 사용 내역)
+- `id` (BIGINT, PK): 로그 식별자
+- `key_id` (INT, FK → key_table.id): API 키 참조
+- `model` (VARCHAR(50)): 사용 모델명
+- `usage` (INT): 토큰 사용량
+- `created_at` (TIMESTAMP): 사용 시각
+
+## 주요 관계
+- 사용자(user) ↔ 모든 로그 및 세션 테이블 (1:N)
+- 퀴즈 카테고리(quiz_category) ↔ 퀴즈(quiz) (1:N)
+- 퀴즈(quiz) ↔ 퀴즈 옵션(quiz_options) (1:N)
+- 학습 세션(learning_session) ↔ 퀴즈 로그(quiz_log) (1:N)
+- 단어(word) ↔ 단어 로그(word_log) (1:N)
+- 음성 세션(speech_session) ↔ 음성 평가(speech_evaluation) (1:N)
+
+## 인덱스 최적화
+주요 검색 조건에 대한 인덱스가 설정되어 성능 최적화가 이루어짐:
+- 사용자 레벨별, 카테고리별 검색
+- 퀴즈 난이도별, 유형별 검색
+- 시간 기반 로그 검색
+- 사용자별 행동 패턴 분석
