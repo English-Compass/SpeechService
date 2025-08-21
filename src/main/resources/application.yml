@@ -35,4 +35,4 @@ logging:
 
 openai:
   api:
-    api-key: ''${OPENAI_API_KEY:your-api-key-here}''
+    api-key: ${OPENAI_API_KEY:your-api-key-here}
