@@ -1,6 +1,26 @@
 ---
 alwaysApply: false
 ---
+## DevTools 자동 재시작 설정
+- **상태**: ✅ 이미 올바르게 설정됨
+- **설정 위치**: `build.gradle`
+- **설정 내용**: `developmentOnly 'org.springframework.boot:spring-boot-devtools'`
+
+### DevTools 작동 조건
+1. **컴파일 성공**: 코드 변경 후 자동 재시작하려면 컴파일 에러가 없어야 함
+2. **파일 저장**: IDE에서 파일을 저장하면 자동으로 클래스패스가 업데이트됨
+3. **변경 감지**: `src/main/` 하위 파일 변경 시 자동 재시작 트리거
+
+### 자동 재시작이 안 되는 경우
+- **컴파일 에러 존재**: `./gradlew compileJava`로 확인
+- **IDE 자동 빌드 비활성화**: IDE 설정 확인 필요
+- **경로 문제**: `src/main/` 외부 파일 변경 시
+
+## 중요한 기억사항
+1. **애플리케이션 수동 재시작 불필요**: DevTools가 활성화되어 있으면 코드 변경 후 자동 재시작됨
+2. **컴파일 에러 우선 해결**: 자동 재시작 전에 컴파일 에러를 반드시 해결해야 함
+3. **포트 확인**: 애플리케이션이 8082 포트에서 정상 실행 중인지 `curl` 테스트로 확인
+
 ## 3. 🎯 현재 작업 컨텍스트 (Current Working Context)
 
 ### 3.1. 현재 작업 경로 및 초점
@@ -139,27 +159,22 @@ alwaysApply: false
 - `keyword` (VARCHAR(500)): 키워드 (쉼표 구분)
 - `created_at`, `updated_at` (TIMESTAMP): 생성/수정일자
 
-### 5. 음성 평가 관련 테이블
+### speech_sessions
 
-#### speech_session (음성 평가 세션)
-- `id` (BIGINT, PK): 세션 식별자
-- `user_id` (BIGINT, FK → user.id): 사용자 ID
-- `session_type` (VARCHAR(50)): 세션 유형 (roleplay, pronunciation, grammar)
-- `start_time` (TIMESTAMP): 시작 시간
-- `end_time` (TIMESTAMP): 종료 시간
-- `total_score` (DECIMAL(5,2)): 총점
-- `created_at` (TIMESTAMP): 생성일자
-
-#### speech_evaluation (음성 평가 결과)
-- `id` (BIGINT, PK): 평가 식별자
-- `speech_session_id` (BIGINT, FK → speech_session.id): 음성 세션 ID
-- `audio_url` (VARCHAR(255)): 음성 파일 URL
-- `pronunciation_score` (DECIMAL(3,2)): 발음 점수 (0.00-1.00)
-- `grammar_score` (DECIMAL(3,2)): 문법 점수 (0.00-1.00)
-- `fluency_score` (DECIMAL(3,2)): 유창성 점수 (0.00-1.00)
-- `feedback` (TEXT): 피드백
-- `ai_analysis` (JSON): AI 분석 결과
-- `created_at` (TIMESTAMP): 생성일자
+- id BIGINT AUTO_INCREMENT PRIMARY KEY,
+- session_id VARCHAR(255) NOT NULL UNIQUE,
+- user_id BIGINT NOT NULL,                    -- 사용자 ID (필요!)
+- topic VARCHAR(255) NOT NULL,                -- 대화 주제 (기록용)
+- difficulty_level VARCHAR(50) NOT NULL,      -- 난이도 (기록용)
+- start_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+- end_time TIMESTAMP,                         -- 세션 종료 시간 (null이면 활성)
+    
+- feedback TEXT,                              -- AI 분석 결과를 사용자 친화적으로 표현
+    
+- created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+- updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    
+- FOREIGN KEY (user_id) REFERENCES "user"(id)
 
 ### 6. 미디어 콘텐츠 추천 테이블
 

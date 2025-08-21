@@ -18,13 +18,21 @@ spring:
   
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: update
     show-sql: true
     properties:
       hibernate:
         format_sql: true
+  data:
+    redis:
+      host: localhost
+      port: 6379
 
 logging:
   level:
     com.example.speechservice: DEBUG
     org.springframework.web: DEBUG
+
+openai:
+  api:
+    api-key: ''${OPENAI_API_KEY:your-api-key-here}''

@@ -1,10 +1,20 @@
 package com.example.speechservice.entity;
 
-import jakarta.persistence.*;
+import java.time.LocalDateTime;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Table;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import lombok.AllArgsConstructor;
-import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "speech_sessions")
@@ -17,31 +27,37 @@ public class SpeechSession {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
-    @Column(nullable = false)
+    @Column(name = "session_id", nullable = false, unique = true)
     private String sessionId;
     
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+    @Column(name = "user_id", nullable = false)
+    private Long userId;
     
     @Column(nullable = false)
     private String topic;
     
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(name = "difficulty_level", nullable = false)
     private DifficultyLevel difficultyLevel;
     
-    @Column(nullable = false)
-    private String aiFirstGreeting;
+    @Column(name = "start_time", nullable = false)
+    private LocalDateTime startTime;
     
-    @Column(nullable = false)
+    @Column(name = "end_time")
+    private LocalDateTime endTime;
+    
+    @Column(columnDefinition = "TEXT")
+    private String feedback;
+    
+    @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
     
-    @Column(nullable = false)
+    @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
     
     @PrePersist
     protected void onCreate() {
+        startTime = LocalDateTime.now();
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
     }

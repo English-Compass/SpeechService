@@ -1,11 +1,21 @@
 package com.example.speechservice.dto;
 
-import lombok.Data;
-import com.example.speechservice.entity.SpeechSession.DifficultyLevel;
+import com.example.speechservice.entity.SpeechSession;
 
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+/**
+ * 새로운 롤플레잉 세션 시작을 위한 요청 DTO 클래스.
+ */
 @Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class SessionStartRequest {
-    private Long kakaoId; // 사용자 식별을 위한 필드
+    private Long userId;
     private String topic;
-    private DifficultyLevel difficultyLevel;
+    private SpeechSession.DifficultyLevel difficultyLevel;
 }

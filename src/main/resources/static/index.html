@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 영어 대화 테스트</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .session-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .session-controls select, .session-controls input {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            flex: 1;
+            min-width: 120px;
+        }
+        .session-controls button {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            min-width: 100px;
+        }
+        .session-controls button:hover {
+            background: #0056b3;
+        }
+        .session-controls button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .conversation-area {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 20px;
+            margin: 20px 0;
+            min-height: 300px;
+            background: #fafafa;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .user-message {
+            background: #e3f2fd;
+            margin-left: 20%;
+            text-align: right;
+        }
+        .ai-message {
+            background: #f3e5f5;
+            margin-right: 20%;
+        }
+        .system-message {
+            background: #fff3e0;
+            text-align: center;
+            font-style: italic;
+        }
+        .recording-controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+        .record-btn {
+            padding: 15px 30px;
+            font-size: 18px;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            margin: 0 10px;
+            transition: all 0.3s;
+        }
+        .record-btn.recording {
+            background: #dc3545;
+            color: white;
+            animation: pulse 1.5s infinite;
+        }
+        .record-btn:not(.recording) {
+            background: #28a745;
+            color: white;
+        }
+        .record-btn:hover:not(.recording) {
+            background: #218838;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        .status {
+            text-align: center;
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .status.success { background: #d4edda; color: #155724; }
+        .status.error { background: #f8d7da; color: #721c24; }
+        .status.info { background: #d1ecf1; color: #0c5460; }
+        .evaluation-result {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .score-bar {
+            background: #e9ecef;
+            border-radius: 10px;
+            height: 20px;
+            margin: 5px 0;
+            overflow: hidden;
+        }
+        .score-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff6b6b, #4ecdc4);
+            transition: width 0.5s;
+        }
+        .status-ended {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .session-status {
+            margin: 10px 0;
+            padding: 8px 12px;
+            border-radius: 5px;
+            font-weight: bold;
+            text-align: center;
+        }
+        
+        .session-active {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .session-ended {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 AI 영어 대화 테스트</h1>
+        
+        <!-- 세션 시작/종료 컨트롤 -->
+        <div class="session-controls">
+            <select id="difficultyLevel">
+                <option value="BEGINNER">초급 - 일상생활 단어, 짧은 문장, 느린 음성</option>
+                <option value="INTERMEDIATE">중급 - 중간 수준 어휘, 복잡한 문장 구조</option>
+                <option value="ADVANCED">고급 - 고급 어휘, 깊이 있는 토론</option>
+            </select>
+            <input type="text" id="topic" placeholder="대화 주제 (예: travel, food, culture)" value="travel">
+            <button id="startSessionBtn" onclick="startSession()">세션 시작</button>
+            <button id="endSessionBtn" onclick="endSession()" disabled>세션 종료</button>
+        </div>
+
+        <!-- 상태 표시 -->
+        <div id="status" class="status info">세션을 시작해주세요.</div>
+        <div id="sessionStatus" class="status info">세션 종료됨</div>
+
+        <!-- 대화 영역 -->
+        <div class="conversation-area" id="conversationArea">
+            <div class="message system-message">AI와 영어로 대화를 시작해보세요!</div>
+        </div>
+
+        <!-- 녹음 컨트롤 -->
+        <div class="recording-controls">
+            <button id="recordBtn" class="record-btn" onclick="toggleRecording()" disabled>
+                🎤 말하기
+            </button>
+        </div>
+
+        <!-- 평가 결과 영역 -->
+        <div id="evaluationResults"></div>
+    </div>
+
+    <script>
+        let sessionId = null;
+        let isRecording = false;
+        let mediaRecorder = null;
+        let audioChunks = [];
+
+        // 세션 시작
+        async function startSession() {
+            const topic = document.getElementById('topic').value;
+            const difficulty = document.getElementById('difficultyLevel').value;
+            
+            if (!topic || !difficulty) {
+                showStatus('주제와 난이도를 선택해주세요.', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/v1/sessions/role-playing', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        topic: topic,
+                        difficultyLevel: difficulty,
+                        userId: 1
+                    })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    sessionId = result.sessionId;
+                    
+                    showStatus('세션이 시작되었습니다!', 'success');
+                    addMessage('AI', result.aiFirstGreeting, 'ai-message');
+                    
+                    // UI 상태 변경
+                    document.getElementById('recordBtn').disabled = false;
+                    document.getElementById('endSessionBtn').disabled = false;
+                    document.getElementById('startSessionBtn').disabled = true;
+                    
+                    // 세션 상태 표시
+                    document.getElementById('sessionStatus').textContent = '세션 진행 중';
+                    document.getElementById('sessionStatus').className = 'session-status session-active';
+                    
+                    // 대화 영역 초기화
+                    document.getElementById('conversationArea').innerHTML = '';
+                    addMessage('AI', result.aiFirstGreeting, 'ai-message');
+                } else {
+                    showStatus('세션 시작에 실패했습니다.', 'error');
+                }
+            } catch (error) {
+                console.error('세션 시작 오류:', error);
+                showStatus('세션 시작 중 오류가 발생했습니다.', 'error');
+            }
+        }
+
+        // 세션 종료
+        async function endSession() {
+            if (!sessionId) return;
+
+            try {
+                const response = await fetch(`/api/v1/sessions/role-playing/${sessionId}/end`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showStatus(`세션이 종료되었습니다. (${result.endReason})`, 'success');
+                    addMessage('시스템', `세션 종료: ${result.message}`, 'system-message');
+                    
+                    // 세션 종료 후 피드백 조회 및 표시
+                    await showEvaluationResults();
+                    
+                    // UI 상태 초기화
+                    resetUI();
+                    
+                    // 세션 종료 상태 표시
+                    document.getElementById('sessionStatus').textContent = '세션 종료됨';
+                    document.getElementById('sessionStatus').className = 'status-ended';
+                } else {
+                    showStatus('세션 종료에 실패했습니다.', 'error');
+                }
+            } catch (error) {
+                console.error('세션 종료 오류:', error);
+                showStatus('세션 종료 중 오류가 발생했습니다.', 'error');
+            }
+        }
+
+        // 녹음 시작/중지
+        async function toggleRecording() {
+            if (!isRecording) {
+                await startRecording();
+            } else {
+                stopRecording();
+            }
+        }
+
+        // 녹음 시작
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    await sendAudioToServer(audioBlob);
+                };
+
+                mediaRecorder.start();
+                isRecording = true;
+                
+                const recordBtn = document.getElementById('recordBtn');
+                recordBtn.textContent = '⏹️ 녹음 중지';
+                recordBtn.classList.add('recording');
+                
+                showStatus('녹음 중... 영어로 말해보세요!', 'info');
+            } catch (error) {
+                showStatus(`마이크 접근 오류: ${error.message}`, 'error');
+            }
+        }
+
+        // 녹음 중지
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                
+                isRecording = false;
+                
+                const recordBtn = document.getElementById('recordBtn');
+                recordBtn.textContent = '🎤 말하기';
+                recordBtn.classList.remove('recording');
+                
+                showStatus('음성 처리 중...', 'info');
+            }
+        }
+
+        // 오디오를 서버로 전송
+        async function sendAudioToServer(audioBlob) {
+            if (!sessionId) return;
+
+            const formData = new FormData();
+            formData.append('audio', audioBlob);
+
+            try {
+                const response = await fetch(`/api/v1/sessions/role-playing/${sessionId}/talk`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    
+                    // 사용자 발화 표시
+                    if (result.userText) {
+                        addMessage('사용자', result.userText, 'user-message');
+                    } else {
+                        addMessage('사용자', '🎤 [음성 입력]', 'user-message');
+                    }
+                    
+                    // AI 응답 표시
+                    if (result.text) {
+                        addMessage('AI', result.text, 'ai-message');
+                        if (result.audio) {
+                            console.log('AI 음성 데이터 받음, 길이:', result.audio.length);
+                            playAudio(result.audio);
+                        } else {
+                            console.error('AI 음성 데이터가 없습니다');
+                            showStatus('AI 음성 생성에 실패했습니다.', 'error');
+                        }
+                    }
+                    
+                    // 세션 종료 상태 확인 (사용자 의도 기반 자동 종료 감지)
+                    if (result.text && (result.text.includes('[SESSION_ENDED]') || 
+                                       result.text.includes('세션이 종료되었습니다') || 
+                                       result.text.includes('대화를 마무리하겠습니다') ||
+                                       result.text.includes('If you ever want to chat again'))) {
+                        console.log('세션이 자동으로 종료되었습니다. 피드백을 조회합니다.');
+                        
+                        // 세션 종료 상태 표시
+                        document.getElementById('sessionStatus').textContent = '세션 자동 종료됨';
+                        document.getElementById('sessionStatus').className = 'session-status session-ended';
+                        
+                        // 잠시 기다린 후 피드백 조회 (백엔드 처리 완료 대기)
+                        setTimeout(async () => {
+                            await showEvaluationResults();
+                            resetUI();
+                        }, 2000);
+                    }
+                    
+                } else {
+                    showStatus('음성 전송에 실패했습니다.', 'error');
+                }
+            } catch (error) {
+                console.error('음성 전송 오류:', error);
+                showStatus('음성 전송 중 오류가 발생했습니다.', 'error');
+            }
+        }
+
+        // 피드백 결과 표시
+        async function showEvaluationResults() {
+            if (!sessionId) {
+                console.log('세션 ID가 없습니다.');
+                return;
+            }
+
+            try {
+                console.log('피드백 조회 시작:', sessionId);
+                const response = await fetch(`/api/v1/sessions/role-playing/${sessionId}/evaluations`);
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('피드백 응답:', result);
+                    
+                    if (result && result.feedback) {
+                        displayEvaluation(result);
+                        showStatus('피드백이 표시되었습니다!', 'success');
+                    } else {
+                        console.log('피드백이 없습니다:', result);
+                        showStatus('피드백이 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.', 'warning');
+                        
+                        // 3초 후 다시 시도
+                        setTimeout(() => {
+                            if (sessionId) {
+                                showEvaluationResults();
+                            }
+                        }, 3000);
+                    }
+                } else {
+                    const errorText = await response.text();
+                    console.error('피드백 조회 실패:', response.status, errorText);
+                    showStatus(`피드백 조회에 실패했습니다. (${response.status})`, 'error');
+                }
+            } catch (error) {
+                console.error('피드백 조회 오류:', error);
+                showStatus('피드백 조회 중 오류가 발생했습니다.', 'error');
+            }
+        }
+
+        // 평가 결과 표시
+        function displayEvaluation(evaluation) {
+            const evaluationDiv = document.getElementById('evaluationResults');
+            evaluationDiv.innerHTML = `
+                <div class="evaluation-header">
+                    <h3>🎯 세션 평가 결과</h3>
+                    <p><strong>세션 ID:</strong> ${evaluation.sessionId}</p>
+                    <p><strong>평가 시간:</strong> ${new Date(evaluation.createdAt).toLocaleString('ko-KR')}</p>
+                </div>
+                <div class="evaluation-content">
+                    <h4>📝 AI 피드백</h4>
+                    <div class="feedback-text">
+                        ${evaluation.feedback ? evaluation.feedback.replace(/\n/g, '<br>') : '피드백이 준비되지 않았습니다.'}
+                    </div>
+                </div>
+            `;
+            evaluationDiv.style.display = 'block';
+            showStatus('피드백이 표시되었습니다!', 'success');
+        }
+
+        // AI 음성 재생
+        function playAudio(audioBase64) {
+            try {
+                console.log('음성 재생 시작, Base64 길이:', audioBase64.length);
+                
+                // Base64 디코딩
+                const audioData = atob(audioBase64);
+                const audioArray = new Uint8Array(audioData.length);
+                for (let i = 0; i < audioData.length; i++) {
+                    audioArray[i] = audioData.charCodeAt(i);
+                }
+                
+                console.log('디코딩된 오디오 데이터 크기:', audioArray.length);
+                
+                // Audio 객체 생성 및 재생 (MP3 형식)
+                const audioBlob = new Blob([audioArray], { type: 'audio/mp3' });
+                const audioUrl = URL.createObjectURL(audioBlob);
+                const audio = new Audio(audioUrl);
+                
+                // 오디오 로드 완료 이벤트
+                audio.oncanplaythrough = () => {
+                    console.log('오디오 로드 완료, 재생 시작');
+                    showStatus('AI 음성 재생 중...', 'info');
+                };
+                
+                // 오디오 재생 완료 이벤트
+                audio.onended = () => {
+                    console.log('오디오 재생 완료');
+                    URL.revokeObjectURL(audioUrl); // 메모리 정리
+                    showStatus('AI 음성 재생 완료', 'success');
+                };
+                
+                // 오디오 오류 이벤트
+                audio.onerror = (error) => {
+                    console.error('오디오 오류:', error);
+                    showStatus('AI 음성 재생 중 오류가 발생했습니다.', 'error');
+                };
+                
+                // 오디오 재생 시작
+                audio.play().catch(error => {
+                    console.error('음성 재생 실패:', error);
+                    showStatus('음성 재생에 실패했습니다: ' + error.message, 'error');
+                });
+                
+            } catch (error) {
+                console.error('음성 재생 오류:', error);
+                showStatus('음성 재생 중 오류가 발생했습니다: ' + error.message, 'error');
+            }
+        }
+
+        // 메시지 추가
+        function addMessage(sender, text, className) {
+            const conversationArea = document.getElementById('conversationArea');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${className}`;
+            messageDiv.innerHTML = `<strong>${sender}:</strong> ${text}`;
+            conversationArea.appendChild(messageDiv);
+            conversationArea.scrollTop = conversationArea.scrollHeight;
+        }
+
+        // 상태 표시
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+        }
+
+        // UI 상태 초기화
+        function resetUI() {
+            sessionId = null;
+            document.getElementById('recordBtn').disabled = true;
+            document.getElementById('endSessionBtn').disabled = true;
+            document.getElementById('startSessionBtn').disabled = false;
+            
+            // 세션 상태 표시
+            document.getElementById('sessionStatus').textContent = '세션 종료됨';
+            document.getElementById('sessionStatus').className = 'session-status session-ended';
+            
+            // 대화 영역 초기화
+            document.getElementById('conversationArea').innerHTML = '';
+            
+            // 피드백 영역 숨기기
+            document.getElementById('evaluationResults').style.display = 'none';
+            
+            showStatus('새로운 세션을 시작할 수 있습니다.', 'info');
+        }
+
+        // 페이지 로드 시 초기화
+        window.onload = function() {
+            showStatus('AI 영어 대화 테스트에 오신 것을 환영합니다!', 'info');
+        };
+    </script>
+</body>
+</html>
