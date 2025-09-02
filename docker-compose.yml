@@ -1,14 +1,13 @@
-version: '3.8'
-
 services:
   speech-service:
     build: .
     container_name: speech-service
     ports:
-      - "8081:8081"
+      - "8082:8082"
     environment:
       - SPRING_PROFILES_ACTIVE=docker
-      - SERVER_PORT=8081
+      - SERVER_PORT=8082
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       # H2 데이터베이스 설정 (인메모리)
       - SPRING_DATASOURCE_URL=jdbc:h2:mem:testdb
       - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.h2.Driver
@@ -20,15 +19,35 @@ services:
       - SPRING_JPA_HIBERNATE_DDL_AUTO=create-drop
       - SPRING_JPA_SHOW_SQL=true
       - SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL=true
+      # Redis 설정
+      - SPRING_DATA_REDIS_HOST=redis
+      - SPRING_DATA_REDIS_PORT=6379
+    depends_on:
+      - redis
     networks:
       - speech-service-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/api/speech/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8082/api/v1/speech-sessions/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
+
+  redis:
+    image: redis:7-alpine
+    container_name: speech-service-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - speech-service-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 networks:
   speech-service-network:
