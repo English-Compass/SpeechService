@@ -1,5 +1,6 @@
 package com.example.speechservice.controller;
 
+import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,22 +18,22 @@ import com.example.speechservice.dto.SessionStartResponse;
 import com.example.speechservice.dto.SpeechEvaluationResult;
 import com.example.speechservice.dto.TalkResponse;
 import com.example.speechservice.service.EvaluationService;
-import com.example.speechservice.service.SessionService;
+import com.example.speechservice.service.SpeechSessionService;
 
 /**
- * 롤플레잉 세션과 관련된 HTTP 요청을 처리하는 REST 컨트롤러입니다.
- * 세션 시작, 대화 진행 등의 엔드포인트를 제공합니다.
+ * 롤플레잉 음성 세션과 관련된 HTTP 요청을 처리하는 REST 컨트롤러입니다.
+ * 음성 세션 시작, 대화 진행 등의 엔드포인트를 제공합니다.
  */
 @RestController
-@RequestMapping("/api/v1/sessions") // 모든 세션 관련 엔드포인트의 기본 경로
+@RequestMapping("/api/v1/speech-sessions") // 모든 음성 세션 관련 엔드포인트의 기본 경로
 @CrossOrigin(origins = "*") // CORS 허용 (개발 단계에서 모든 출처 허용)
-public class SessionController {
+public class SpeechSessionController {
     
-    private final SessionService sessionService;
+    private final SpeechSessionService speechSessionService;
     private final EvaluationService evaluationService;
     
-    public SessionController(SessionService sessionService, EvaluationService evaluationService) {
-        this.sessionService = sessionService;
+    public SpeechSessionController(SpeechSessionService speechSessionService, EvaluationService evaluationService) {
+        this.speechSessionService = speechSessionService;
         this.evaluationService = evaluationService;
     }
     
@@ -45,7 +46,7 @@ public class SessionController {
      */
     @PostMapping("/role-playing")
     public ResponseEntity<SessionStartResponse> startSession(@RequestBody SessionStartRequest request) {
-        SessionStartResponse response = sessionService.startSession(request);
+        SessionStartResponse response = speechSessionService.startSession(request);
         return ResponseEntity.ok(response);
     }
     
@@ -64,7 +65,7 @@ public class SessionController {
             @RequestParam("audio") MultipartFile audio) {
         try {
             // MultipartFile을 InputStream으로 변환하여 메모리에서 직접 처리
-            TalkResponse response = sessionService.processTalk(sessionId, audio.getInputStream());
+            TalkResponse response = speechSessionService.processTalk(sessionId, audio.getInputStream());
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             // 음성 파일 처리 중 예외 발생 시 서버 에러 (HTTP 500) 응답을 반환합니다.
@@ -96,8 +97,24 @@ public class SessionController {
      */
     @PostMapping("/role-playing/{sessionId}/end")
     public ResponseEntity<SessionEndResponse> endSession(@PathVariable String sessionId) {
-        SessionEndResponse response = sessionService.endSession(sessionId, "MANUAL");
+        SessionEndResponse response = speechSessionService.endSession(sessionId, "MANUAL");
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 모든 세션의 평가 결과를 페이지네이션으로 조회하는 엔드포인트입니다.
+     * 사용자가 이전 세션들의 피드백을 확인할 때 사용됩니다.
+     *
+     * @param page 페이지 번호 (0부터 시작)
+     * @param size 페이지 크기
+     * @return 페이지네이션된 평가 결과 목록을 포함하는 ResponseEntity
+     */
+    @GetMapping("/evaluations")
+    public ResponseEntity<Page<SpeechEvaluationResult>> getAllEvaluations(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        Page<SpeechEvaluationResult> evaluations = evaluationService.getAllEvaluations(page, size);
+        return ResponseEntity.ok(evaluations);
     }
 
     /**

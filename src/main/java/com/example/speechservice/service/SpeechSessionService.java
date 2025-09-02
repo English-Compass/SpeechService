@@ -16,6 +16,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.example.speechservice.dto.RolePlayingScenario;
+import com.example.speechservice.dto.RolePlayingSessionRequest;
+import com.example.speechservice.dto.RolePlayingSessionResponse;
 import com.example.speechservice.dto.SessionEndResponse;
 import com.example.speechservice.dto.SessionStartRequest;
 import com.example.speechservice.dto.SessionStartResponse;
@@ -29,26 +32,29 @@ import jakarta.transaction.Transactional;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 롤플레잉 세션의 핵심 비즈니스 로직을 처리하는 서비스 클래스입니다.
- * 세션 생성 및 관리, AI 대화 진행, 대화 기록 저장 등의 기능을 수행합니다.
+ * 롤플레잉 음성 세션의 핵심 비즈니스 로직을 처리하는 서비스 클래스입니다.
+ * 음성 세션 생성 및 관리, AI 대화 진행, 대화 기록 저장 등의 기능을 수행합니다.
  */
 @Service
 @Slf4j
-public class SessionService {
+public class SpeechSessionService {
 
     private final SpeechSessionRepository speechSessionRepository;
     private final OpenAIService openAIService;
     private final EvaluationService evaluationService;
     private final RedisTemplate<String, Object> redisTemplate;
+    private final RolePlayingScenarioService rolePlayingScenarioService;
 
-    public SessionService(SpeechSessionRepository speechSessionRepository,
+    public SpeechSessionService(SpeechSessionRepository speechSessionRepository,
                           OpenAIService openAIService,
                           EvaluationService evaluationService,
-                          RedisTemplate<String, Object> redisTemplate) {
+                          RedisTemplate<String, Object> redisTemplate,
+                          RolePlayingScenarioService rolePlayingScenarioService) {
         this.speechSessionRepository = speechSessionRepository;
         this.openAIService = openAIService;
         this.evaluationService = evaluationService;
         this.redisTemplate = redisTemplate;
+        this.rolePlayingScenarioService = rolePlayingScenarioService;
     }
 
     /**
@@ -99,6 +105,245 @@ public class SessionService {
                 .createdAt(savedSession.getCreatedAt())
                 .build();
     }
+    
+    /**
+     * 롤 플레잉 세션을 시작합니다.
+     */
+    @Transactional
+    public RolePlayingSessionResponse startRolePlayingSession(RolePlayingSessionRequest request) {
+        log.info("시나리오 타입 확인 - isPredefinedScenario: {}, isCustomScenario: {}", 
+                request.isPredefinedScenario(), request.isCustomScenario());
+        log.info("요청 데이터 - scenarioId: '{}', customAiRole: '{}', customUserRole: '{}', customSituation: '{}'", 
+                request.getScenarioId(), request.getCustomAiRole(), request.getCustomUserRole(), request.getCustomSituation());
+        
+        // 1. 시나리오 정보 가져오기
+        RolePlayingScenario scenario;
+        if (request.isPredefinedScenario()) {
+            log.info("미리 정의된 시나리오 사용");
+            scenario = rolePlayingScenarioService.findScenarioById(request.getScenarioId());
+        } else if (request.isCustomScenario()) {
+            log.info("사용자 정의 시나리오 사용");
+            scenario = rolePlayingScenarioService.createCustomScenario(
+                request.getCustomAiRole(), 
+                request.getCustomUserRole(), 
+                request.getCustomSituation()
+            );
+        } else {
+            log.error("유효하지 않은 시나리오 정보");
+            throw new IllegalArgumentException("유효하지 않은 시나리오 정보입니다.");
+        }
+        
+        log.info("생성된 시나리오: {}", scenario);
+        
+        if (scenario == null) {
+            log.error("시나리오가 null입니다. 요청 데이터를 다시 확인해주세요.");
+            throw new IllegalStateException("시나리오 생성에 실패했습니다.");
+        }
+        
+        // 2. 동적 상황 생성 및 AI 첫 인사 생성
+        String dynamicSituation = rolePlayingScenarioService.generateDynamicSituation(
+            scenario.getAiRole(), 
+            scenario.getUserRole(), 
+            scenario.getSituation()
+        );
+        
+        String sessionId = generateUniqueSessionId();
+        String aiFirstGreeting = generateRolePlayingAIFirstGreeting(scenario, request.getDifficultyLevel());
+        
+        // 3. SpeechSession 엔티티 생성 및 저장
+        SpeechSession session = new SpeechSession();
+        session.setSessionId(sessionId);
+        
+        // userId 처리 - 숫자 형식이면 Long으로 변환, 아니면 기본값 사용
+        Long userId;
+        try {
+            userId = Long.parseLong(request.getUserId());
+        } catch (NumberFormatException e) {
+            // userId가 숫자가 아닌 경우 기본값 사용
+            userId = 1L;
+        }
+        session.setUserId(userId);
+        
+        session.setTopic("role-playing:" + scenario.getId());
+        session.setDifficultyLevel(SpeechSession.DifficultyLevel.valueOf(request.getDifficultyLevel()));
+        
+        SpeechSession savedSession = speechSessionRepository.save(session);
+        
+        // 4. AI 첫 인사를 Redis에 저장 (aiFirstGreeting이 null이 아닌 경우에만)
+        List<ChatMessage> initialMessages = new ArrayList<>();
+        if (aiFirstGreeting != null) {
+            initialMessages.add(new ChatMessage(ChatMessageRole.ASSISTANT.value(), aiFirstGreeting));
+        }
+        redisTemplate.opsForValue().set(getChatHistoryKey(sessionId), initialMessages, Duration.ofHours(1));
+        
+        // 5. 응답 DTO 생성 및 반환 (동적 상황 포함)
+        return new RolePlayingSessionResponse(
+            savedSession.getSessionId(),
+            request.getDifficultyLevel(),
+            scenario.getAiRole(),
+            scenario.getUserRole(),
+            dynamicSituation,  // 동적으로 생성된 상황 사용
+            aiFirstGreeting,
+            savedSession.getCreatedAt()
+        );
+    }
+    
+    /**
+     * 롤 플레잉 시나리오에 맞는 AI의 첫 인사를 생성합니다.
+     */
+    private String generateRolePlayingAIFirstGreeting(RolePlayingScenario scenario, String difficultyLevel) {
+        log.info("AI Role: '{}', Scenario ID: '{}'", scenario.getAiRole(), scenario.getId());
+        
+        // 정해진 시나리오인지 확인
+        if (isPredefinedScenario(scenario.getAiRole())) {
+            log.info("정해진 시나리오로 인식됨: {}", scenario.getAiRole());
+            // 정해진 시나리오는 항상 통일된 인사 사용
+            return generatePredefinedScenarioGreeting(scenario.getAiRole(), difficultyLevel);
+        } else {
+            log.info("사용자 정의 시나리오로 인식됨: {}", scenario.getAiRole());
+            // 사용자 정의 역할은 AI 첫 인사 없음 (null 반환)
+            return null;
+        }
+    }
+    
+    /**
+     * 정해진 시나리오인지 확인하는 헬퍼 메서드
+     */
+    private boolean isPredefinedScenario(String aiRole) {
+        String role = aiRole.toLowerCase();
+        log.info("isPredefinedScenario 체크: '{}'", role);
+        
+        boolean isPredefined = role.contains("바리스타") || role.contains("cafe") || role.contains("barista") ||
+               role.contains("웨이터") || role.contains("restaurant") || role.contains("waiter") ||
+               role.contains("호텔") || role.contains("hotel") || role.contains("프론트") || role.contains("front") ||
+               role.contains("점원") || role.contains("shop") || role.contains("clerk") ||
+               role.contains("의사") || role.contains("doctor") ||
+               role.contains("항공사") || role.contains("airline") || role.contains("airport") ||
+               role.contains("은행원") || role.contains("bank") || role.contains("banker");
+               
+        log.info("isPredefined 결과: {}", isPredefined);
+        return isPredefined;
+    }
+    
+    /**
+     * 정해진 시나리오용 통일된 첫 인사 생성
+     */
+    private String generatePredefinedScenarioGreeting(String aiRole, String difficultyLevel) {
+        // 모든 정해진 시나리오는 통일된 인사 사용
+        return "Hello! How can I help you?";
+    }
+    
+
+    
+    /**
+     * 일반 세션을 위한 시스템 프롬프트를 생성합니다.
+     */
+    private String generateRegularSystemPrompt(SpeechSession session) {
+        return String.format(
+            "You are a friendly English tutor for %s level students. " +
+            "Your user wants to practice speaking about %s. " +
+            "Use vocabulary and grammar appropriate for %s level. " +
+            "Keep your responses encouraging and educational. " +
+            "**USER SPEECH CORRECTION POLICY - SMART CORRECTIONS ONLY:** " +
+            "**CORRECT ONLY when you detect:** " +
+            "1. **Major grammatical errors**: Wrong verb tense, missing articles, subject-verb agreement " +
+            "2. **Significant vocabulary misuse**: Wrong word choice that completely changes meaning " +
+            "3. **Unclear/incomplete sentences**: When the user's meaning is hard to understand " +
+            "4. **Obvious STT errors**: Clear transcription mistakes (e.g., 'I like to eat' vs 'I like to it') " +
+            "**DO NOT correct:** " +
+            "- Minor pronunciation variations " +
+            "- Informal/casual expressions " +
+            "- Regional English differences " +
+            "- When the user's meaning is clear despite small errors " +
+            "- Every single mistake (be selective!) " +
+            "**Correction approach:** " +
+            "- Be gentle and encouraging " +
+            "- Use: 'You can also say: [corrected version]' or 'A more natural way: [corrected version]' " +
+            "- Don't interrupt the conversation flow " +
+            "- Focus on helping, not criticizing " +
+            "**STRICT LEVEL GUIDELINES - Follow these EXACTLY:** " +
+            "For BEGINNER level: " +
+            "- Use ONLY basic, everyday words (hello, good, food, like, want, go, see, eat, drink, work, home, family, friend) " +
+            "- Keep sentences VERY short (3-5 words maximum) " +
+            "- Use simple present tense ONLY " +
+            "- Use repetition and encouragement (like: 'Yes! Good! You can say: I like pizza.') " +
+            "For INTERMEDIATE level: " +
+            "- Use common vocabulary and varied sentence structures " +
+            "- Include past and future tenses " +
+            "- Sentences can be 5-10 words " +
+            "- Encourage natural conversation flow " +
+            "For ADVANCED level: " +
+            "- Use sophisticated vocabulary and complex sentence structures " +
+            "- Include idioms, expressions, and cultural references " +
+            "- Encourage deeper discussions and abstract thinking " +
+            "- Sentences can be 10+ words with multiple clauses",
+            session.getDifficultyLevel().name(),
+            session.getTopic(),
+            session.getDifficultyLevel().name()
+        );
+    }
+    
+    /**
+     * 롤 플레잉 세션을 위한 시스템 프롬프트를 생성합니다.
+     */
+    private String generateRolePlayingSystemPrompt(SpeechSession session) {
+        // topic에서 시나리오 ID 추출 (role-playing:cafe -> cafe)
+        String scenarioId = session.getTopic().substring("role-playing:".length());
+        RolePlayingScenario scenario = rolePlayingScenarioService.findScenarioById(scenarioId);
+        
+        if (scenario == null) {
+            // 시나리오를 찾을 수 없는 경우 기본 프롬프트 사용
+            return generateRegularSystemPrompt(session);
+        }
+        
+        return String.format(
+            "You are a %s in a role-playing scenario. " +
+            "Your user is a %s. " +
+            "The situation is: %s " +
+            "Use vocabulary and grammar appropriate for %s level. " +
+            "Keep your responses encouraging and educational. " +
+            "**USER SPEECH CORRECTION POLICY - SMART CORRECTIONS ONLY:** " +
+            "**CORRECT ONLY when you detect:** " +
+            "1. **Major grammatical errors**: Wrong verb tense, missing articles, subject-verb agreement " +
+            "2. **Significant vocabulary misuse**: Wrong word choice that completely changes meaning " +
+            "3. **Unclear/incomplete sentences**: When the user's meaning is hard to understand " +
+            "4. **Obvious STT errors**: Clear transcription mistakes " +
+            "**DO NOT correct:** " +
+            "- Minor pronunciation variations " +
+            "- Informal/casual expressions " +
+            "- Regional English differences " +
+            "- When the user's meaning is clear despite small errors " +
+            "- Every single mistake (be selective!) " +
+            "**Correction approach:** " +
+            "- Be gentle and encouraging " +
+            "- Use: 'You can also say: [corrected version]' or 'A more natural way: [corrected version]' " +
+            "- Don't interrupt the conversation flow " +
+            "- Focus on helping, not criticizing " +
+            "**STRICT LEVEL GUIDELINES - Follow these EXACTLY:** " +
+            "For BEGINNER level: " +
+            "- Use ONLY basic, everyday words (hello, good, food, like, want, go, see, eat, drink, work, home, family, friend) " +
+            "- Keep sentences VERY short (3-5 words maximum) " +
+            "- Use simple present tense ONLY " +
+            "- Use repetition and encouragement " +
+            "For INTERMEDIATE level: " +
+            "- Use common vocabulary and varied sentence structures " +
+            "- Include past and future tenses " +
+            "- Sentences can be 5-10 words " +
+            "- Encourage natural conversation flow " +
+            "For ADVANCED level: " +
+            "- Use sophisticated vocabulary and complex sentence structures " +
+            "- Include idioms, expressions, and cultural references " +
+            "- Encourage deeper discussions and abstract thinking " +
+            "- Sentences can be 10+ words with multiple clauses " +
+            "**ROLE-PLAYING CONTEXT:** " +
+            "Stay in character as a %s. Respond naturally as if you're actually in this situation.",
+            scenario.getAiRole(),
+            scenario.getUserRole(),
+            scenario.getSituation(),
+            session.getDifficultyLevel().name(),
+            scenario.getAiRole()
+        );
+    }
 
     /**
      * 기존 롤플레잉 세션에서 사용자의 음성 발화를 처리하고 AI의 응답을 반환합니다.
@@ -129,23 +374,15 @@ public class SessionService {
         // 4. 시스템 메시지 추가 (조건부): 대화 기록이 비어있거나, 첫 번째 메시지가 시스템 메시지가 아닌 경우에만
         //    AI의 역할, 대화 주제, 난이도를 정의하는 시스템 메시지를 추가합니다. 이는 AI가 맥락을 유지하고 적절한 수준의 영어를 사용하도록 돕습니다.
         if (messages.isEmpty() || !messages.get(0).getRole().equals(ChatMessageRole.SYSTEM.value())) {
-            String systemPrompt = String.format(
-                "You are a friendly English tutor for %s level students. " +
-                "Your user wants to practice speaking about %s. " +
-                "Use vocabulary and grammar appropriate for %s level. " +
-                "Keep your responses encouraging and educational. " +
-                "If the user makes mistakes, gently correct them and provide helpful examples. " +
-                "For BEGINNER level: Use only basic, everyday words (like: hello, good, food, like, want, go, see, eat, drink, work, home, family, friend). " +
-                "Keep sentences very short (3-5 words max). Use simple present tense only. " +
-                "Speak slowly and clearly. Use repetition and gestures in text (like: 'Yes! Good! You can say: I like pizza.'). " +
-                "For INTERMEDIATE level: Use common vocabulary and varied sentence structures. " +
-                "Include past and future tenses. Sentences can be 5-10 words. " +
-                "For ADVANCED level: Use sophisticated vocabulary, complex sentence structures, and encourage deeper discussions. " +
-                "Include idioms and expressions when appropriate.",
-                session.getDifficultyLevel().name(),
-                session.getTopic(),
-                session.getDifficultyLevel().name()
-            );
+            String systemPrompt;
+            
+            // 롤 플레잉 세션인지 확인
+            if (session.getTopic().startsWith("role-playing:")) {
+                systemPrompt = generateRolePlayingSystemPrompt(session);
+            } else {
+                systemPrompt = generateRegularSystemPrompt(session);
+            }
+            
             messages.add(0, new ChatMessage(ChatMessageRole.SYSTEM.value(), systemPrompt));
         }
 
@@ -162,9 +399,6 @@ public class SessionService {
 
         // 8. 대화 길이 제한 체크 및 자동 종료
         checkConversationLimit(sessionId, messages);
-        
-        // 8-1. 사용자 의도 감지 및 자동 종료
-        checkUserIntentToEnd(sessionId, userText, messages);
 
         // 9. AI의 텍스트 응답을 음성으로 변환: 난이도에 맞는 음성 속도로 OpenAI Speech API를 사용하여 AI의 텍스트 응답을 음성 데이터로 변환합니다.
         //    InputStream으로 반환되는 음성 데이터를 Base64로 인코딩하여 TalkResponse에 포함시킵니다.
@@ -292,38 +526,7 @@ public class SessionService {
         }
     }
 
-    /**
-     * 사용자 의도 감지 및 자동 종료를 위한 헬퍼 메서드.
-     * 사용자가 "종료", "끝", "끝내", "끝내기" 등의 키워드를 사용하면 세션을 자동으로 종료합니다.
-     *
-     * @param sessionId 세션 ID
-     * @param userText 사용자의 현재 발화 텍스트
-     * @param messages 현재 대화 기록
-     */
-    private void checkUserIntentToEnd(String sessionId, String userText, List<ChatMessage> messages) {
-        // 사용자 발화에서 종료 의도를 포함하는 키워드를 찾습니다.
-        String[] endKeywords = {"종료", "끝", "끝내", "끝내기", "end", "finish", "stop", "quit", "bye", "goodbye"};
-        boolean userWantsToEnd = false;
 
-        for (String keyword : endKeywords) {
-            if (userText.toLowerCase().contains(keyword.toLowerCase())) {
-                userWantsToEnd = true;
-                break;
-            }
-        }
-
-        if (userWantsToEnd) {
-            log.info("User wants to end session: {}", sessionId);
-            // 마지막 AI 응답을 종료 메시지로 변경
-            if (!messages.isEmpty() && messages.get(messages.size() - 1).getRole().equals(ChatMessageRole.ASSISTANT.value())) {
-                String endMessage = "네, 대화를 마무리하겠습니다. 오늘 영어 연습 정말 잘 하셨습니다! 세션이 종료되었습니다. [SESSION_ENDED]";
-                messages.set(messages.size() - 1, new ChatMessage(ChatMessageRole.ASSISTANT.value(), endMessage));
-                // Redis에 업데이트된 메시지 저장
-                redisTemplate.opsForValue().set(getChatHistoryKey(sessionId), messages, Duration.ofHours(1));
-            }
-            endSession(sessionId, "MANUAL"); // 사용자가 의도적으로 종료한 것으로 간주
-        }
-    }
 
     /**
      * AI의 첫 인사를 생성하는 헬퍼 메서드.

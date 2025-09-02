@@ -4,6 +4,9 @@ server:
 spring:
   application:
     name: speech-service
+  main:
+    lazy-initialization: true
+    banner-mode: off
   
   datasource:
     url: jdbc:h2:mem:testdb
@@ -13,16 +16,22 @@ spring:
   
   h2:
     console:
-      enabled: true
+      enabled: false
       path: /h2-console
   
   jpa:
     hibernate:
       ddl-auto: update
-    show-sql: true
+    show-sql: false
+    open-in-view: false
     properties:
       hibernate:
-        format_sql: true
+        format_sql: false
+        generate_statistics: false
+        order_inserts: true
+        order_updates: true
+        jdbc:
+          batch_size: 25
   data:
     redis:
       host: localhost
@@ -30,9 +39,11 @@ spring:
 
 logging:
   level:
-    com.example.speechservice: DEBUG
-    org.springframework.web: DEBUG
+    root: WARN
+    com.example.speechservice: INFO
 
 openai:
   api:
-    api-key: ${OPENAI_API_KEY:your-api-key-here}
+    api-key: ${OPENAI_API_KEY}
+
+

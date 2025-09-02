@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream; // 음성 파일 스트림 처리를 위한 임포트 추가
+import java.time.Duration; // Duration 임포트
 import java.util.List;
 
 // import com.theokanning.openai.audio.SpeechResult; // TTS API 응답을 위한 임포트 추가 (필요 없으므로 제거)
@@ -29,11 +30,14 @@ public class OpenAIService {
     /**
      * OpenAIService 생성자.
      * application.yml에 설정된 OpenAI API 키를 주입받아 OpenAiService 인스턴스를 초기화합니다.
+     * 또한, OpenAI API 호출 시 타임아웃을 설정합니다.
      *
      * @param apiKey OpenAI API 키
      */
     public OpenAIService(@Value("${openai.api.api-key}") String apiKey) {
-        this.openAiService = new OpenAiService(apiKey);
+        // OkHttpClient를 사용하여 타임아웃 설정 (이전 오류 발생 부분)
+        // OkHttpClient를 직접 전달하는 생성자가 없으므로 Duration을 직접 전달
+        this.openAiService = new OpenAiService(apiKey, Duration.ofSeconds(60)); // 연결, 읽기, 쓰기 타임아웃 60초
     }
 
     /**

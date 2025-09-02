@@ -20,6 +20,7 @@ public class SpeechEvaluationResult {
     private Long id;
     private String sessionId;
     private String feedback;
+    private String recommendedDifficulty;
     private LocalDateTime createdAt;
 }
 

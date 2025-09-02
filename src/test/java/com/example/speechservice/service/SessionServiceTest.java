@@ -49,8 +49,11 @@ class SessionServiceTest {
     @Mock
     private ValueOperations<String, Object> valueOperations;
 
+    @Mock
+    private RolePlayingScenarioService rolePlayingScenarioService;
+
     @InjectMocks
-    private SessionService sessionService;
+    private SpeechSessionService sessionService;
 
     private SessionStartRequest validRequest;
     private SpeechSession mockSession;

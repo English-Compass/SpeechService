@@ -9,6 +9,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 public class SpeechServiceApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(SpeechServiceApplication.class, args);
+        SpringApplication app = new SpringApplication(SpeechServiceApplication.class);
+        app.setLazyInitialization(true);
+        app.run(args);
     }
 }
