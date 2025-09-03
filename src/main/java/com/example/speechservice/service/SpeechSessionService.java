@@ -167,6 +167,13 @@ public class SpeechSessionService {
         session.setTopic("role-playing:" + scenario.getId());
         session.setDifficultyLevel(SpeechSession.DifficultyLevel.valueOf(request.getDifficultyLevel()));
         
+        // 사용자 정의 시나리오의 경우, 역할과 상황 정보를 세션에 직접 저장
+        if (request.isCustomScenario()) {
+            session.setAiRole(scenario.getAiRole());
+            session.setUserRole(scenario.getUserRole());
+            session.setSituation(scenario.getSituation());
+        }
+
         SpeechSession savedSession = speechSessionRepository.save(session);
         
         // 4. AI 첫 인사를 Redis에 저장 (aiFirstGreeting이 null이 아닌 경우에만)
@@ -192,34 +199,35 @@ public class SpeechSessionService {
      * 롤 플레잉 시나리오에 맞는 AI의 첫 인사를 생성합니다.
      */
     private String generateRolePlayingAIFirstGreeting(RolePlayingScenario scenario, String difficultyLevel) {
+        log.info("=== AI First Greeting Debug ===");
         log.info("AI Role: '{}', Scenario ID: '{}'", scenario.getAiRole(), scenario.getId());
+        log.info("Scenario type check - isPredefined: {}", isPredefinedScenarioById(scenario.getId()));
         
-        // 정해진 시나리오인지 확인
-        if (isPredefinedScenario(scenario.getAiRole())) {
-            log.info("정해진 시나리오로 인식됨: {}", scenario.getAiRole());
-            // 정해진 시나리오는 항상 통일된 인사 사용
-            return generatePredefinedScenarioGreeting(scenario.getAiRole(), difficultyLevel);
+        // 정해진 시나리오인지 확인 (시나리오 ID로 판단)
+        if (isPredefinedScenarioById(scenario.getId())) {
+            log.info("정해진 시나리오로 인식됨: {}", scenario.getId());
+            String greeting = generatePredefinedScenarioGreeting(scenario.getAiRole(), difficultyLevel);
+            log.info("생성된 첫 인사: '{}'", greeting);
+            return greeting;
         } else {
-            log.info("사용자 정의 시나리오로 인식됨: {}", scenario.getAiRole());
+            log.info("사용자 정의 시나리오로 인식됨: {}", scenario.getId());
+            log.info("사용자 정의 역할은 AI 첫 인사 없음 (null 반환)");
             // 사용자 정의 역할은 AI 첫 인사 없음 (null 반환)
             return null;
         }
     }
     
     /**
-     * 정해진 시나리오인지 확인하는 헬퍼 메서드
+     * 정해진 시나리오인지 확인하는 헬퍼 메서드 (시나리오 ID로 판단)
      */
-    private boolean isPredefinedScenario(String aiRole) {
-        String role = aiRole.toLowerCase();
-        log.info("isPredefinedScenario 체크: '{}'", role);
+    private boolean isPredefinedScenarioById(String scenarioId) {
+        log.info("isPredefinedScenarioById 체크: '{}'", scenarioId);
         
-        boolean isPredefined = role.contains("바리스타") || role.contains("cafe") || role.contains("barista") ||
-               role.contains("웨이터") || role.contains("restaurant") || role.contains("waiter") ||
-               role.contains("호텔") || role.contains("hotel") || role.contains("프론트") || role.contains("front") ||
-               role.contains("점원") || role.contains("shop") || role.contains("clerk") ||
-               role.contains("의사") || role.contains("doctor") ||
-               role.contains("항공사") || role.contains("airline") || role.contains("airport") ||
-               role.contains("은행원") || role.contains("bank") || role.contains("banker");
+        // 정해진 시나리오 ID 목록
+        boolean isPredefined = "cafe".equals(scenarioId) || "restaurant".equals(scenarioId) || 
+               "hotel".equals(scenarioId) || "shop".equals(scenarioId) || 
+               "doctor".equals(scenarioId) || "airport".equals(scenarioId) || 
+               "bank".equals(scenarioId);
                
         log.info("isPredefined 결과: {}", isPredefined);
         return isPredefined;
@@ -284,64 +292,108 @@ public class SpeechSessionService {
     }
     
     /**
-     * 롤 플레잉 세션을 위한 시스템 프롬프트를 생성합니다.
+     * 세션에 맞는 시스템 프롬프트를 가져오거나 생성합니다.
      */
-    private String generateRolePlayingSystemPrompt(SpeechSession session) {
-        // topic에서 시나리오 ID 추출 (role-playing:cafe -> cafe)
-        String scenarioId = session.getTopic().substring("role-playing:".length());
-        RolePlayingScenario scenario = rolePlayingScenarioService.findScenarioById(scenarioId);
+    private String getSystemPrompt(SpeechSession session, List<ChatMessage> messages) {
+        // 첫 메시지이거나 시스템 프롬프트가 없는 경우에만 새로 생성
+        if (messages.isEmpty() || !"system".equals(messages.get(0).getRole())) {
+            log.info("새 시스템 메시지 추가");
+            String prompt;
+            if (session.getTopic() != null && "role-playing:custom".equals(session.getTopic())) {
+                log.info("사용자 정의 롤플레잉 세션 감지 - 전용 프롬프트 생성");
+                prompt = generateCustomRolePlayingSystemPrompt(session);
+            } else if (session.getTopic() != null && session.getTopic().startsWith("role-playing:")) {
+                log.info("사전 정의 롤플레잉 세션 감지 - 롤플레잉 시스템 프롬프트 생성");
+                prompt = generatePredefinedRolePlayingSystemPrompt(session);
+            } else {
+                log.info("일반 세션 감지 - 일반 시스템 프롬프트 생성");
+                prompt = generateRegularSystemPrompt(session);
+            }
+            messages.add(0, new ChatMessage("system", prompt));
+            return prompt;
+        }
+        return messages.get(0).getContent();
+    }
+
+    /**
+     * 사전 정의된 롤 플레잉 세션을 위한 시스템 프롬프트를 생성합니다.
+     */
+    private String generatePredefinedRolePlayingSystemPrompt(SpeechSession session) {
+        RolePlayingScenario scenario;
+
+        // 사용자 정의 시나리오인 경우, 세션에 저장된 정보를 사용
+        if ("role-playing:custom".equals(session.getTopic()) && session.getAiRole() != null) {
+            scenario = new RolePlayingScenario(
+                "custom",
+                "사용자 정의",
+                session.getAiRole(),
+                session.getUserRole(),
+                session.getSituation(),
+                "사용자가 정의한 롤 플레잉 시나리오"
+            );
+        } else {
+            // 미리 정의된 시나리오인 경우, ID로 조회
+            String scenarioId = session.getTopic().substring("role-playing:".length());
+            scenario = rolePlayingScenarioService.findScenarioById(scenarioId);
+        }
         
         if (scenario == null) {
             // 시나리오를 찾을 수 없는 경우 기본 프롬프트 사용
+            log.warn("시나리오 정보를 찾을 수 없어 일반 시스템 프롬프트를 사용합니다. SessionId: {}", session.getSessionId());
             return generateRegularSystemPrompt(session);
         }
-        
+
         return String.format(
-            "You are a %s in a role-playing scenario. " +
-            "Your user is a %s. " +
-            "The situation is: %s " +
-            "Use vocabulary and grammar appropriate for %s level. " +
-            "Keep your responses encouraging and educational. " +
-            "**USER SPEECH CORRECTION POLICY - SMART CORRECTIONS ONLY:** " +
-            "**CORRECT ONLY when you detect:** " +
-            "1. **Major grammatical errors**: Wrong verb tense, missing articles, subject-verb agreement " +
-            "2. **Significant vocabulary misuse**: Wrong word choice that completely changes meaning " +
-            "3. **Unclear/incomplete sentences**: When the user's meaning is hard to understand " +
-            "4. **Obvious STT errors**: Clear transcription mistakes " +
-            "**DO NOT correct:** " +
-            "- Minor pronunciation variations " +
-            "- Informal/casual expressions " +
-            "- Regional English differences " +
-            "- When the user's meaning is clear despite small errors " +
-            "- Every single mistake (be selective!) " +
-            "**Correction approach:** " +
-            "- Be gentle and encouraging " +
-            "- Use: 'You can also say: [corrected version]' or 'A more natural way: [corrected version]' " +
-            "- Don't interrupt the conversation flow " +
-            "- Focus on helping, not criticizing " +
-            "**STRICT LEVEL GUIDELINES - Follow these EXACTLY:** " +
-            "For BEGINNER level: " +
-            "- Use ONLY basic, everyday words (hello, good, food, like, want, go, see, eat, drink, work, home, family, friend) " +
-            "- Keep sentences VERY short (3-5 words maximum) " +
-            "- Use simple present tense ONLY " +
-            "- Use repetition and encouragement " +
-            "For INTERMEDIATE level: " +
-            "- Use common vocabulary and varied sentence structures " +
-            "- Include past and future tenses " +
-            "- Sentences can be 5-10 words " +
-            "- Encourage natural conversation flow " +
-            "For ADVANCED level: " +
-            "- Use sophisticated vocabulary and complex sentence structures " +
-            "- Include idioms, expressions, and cultural references " +
-            "- Encourage deeper discussions and abstract thinking " +
-            "- Sentences can be 10+ words with multiple clauses " +
-            "**ROLE-PLAYING CONTEXT:** " +
-            "Stay in character as a %s. Respond naturally as if you're actually in this situation.",
+            "--- CRITICAL INSTRUCTIONS ---\n" +
+            "You are NOT an English teacher, tutor, or language instructor. You are a REAL %s in this REAL situation.\n" +
+            "NEVER mention English practice, learning, tutoring, or language skills.\n" +
+            "NEVER ask about English practice or offer language help.\n" +
+            "NEVER say things like 'How can I help you with your English?'\n" +
+            "Respond exactly as a real %s would in this real situation. Stay completely in character at all times.\n" +
+            "--- Context ---\n" +
+            "Your Role: %s\n" +
+            "User's Role: %s\n" +
+            "Situation: %s\n" +
+            "--- Language Level ---\n" +
+            "Use %s level vocabulary and sentence structures, but do it as part of your natural character speech, not as teaching.\n" +
+            "--- Correction Policy ---\n" +
+            "Only correct the user if they make a major error that completely breaks understanding. If you must correct, be gentle: 'You can also say: [correction]'",
+            scenario.getAiRole(),
+            scenario.getAiRole(),
             scenario.getAiRole(),
             scenario.getUserRole(),
             scenario.getSituation(),
-            session.getDifficultyLevel().name(),
-            scenario.getAiRole()
+            session.getDifficultyLevel().name()
+        );
+    }
+
+    /**
+     * 사용자 정의 롤 플레잉 세션을 위한, 순수 역할극 전용 시스템 프롬프트를 생성합니다.
+     */
+    private String generateCustomRolePlayingSystemPrompt(SpeechSession session) {
+        if (session.getAiRole() == null || session.getUserRole() == null || session.getSituation() == null) {
+            log.warn("사용자 정의 롤플레잉 정보가 세션에 없어 일반 프롬프트를 사용합니다. SessionId: {}", session.getSessionId());
+            return generateRegularSystemPrompt(session);
+        }
+
+        return String.format(
+            "--- CRITICAL ROLE-PLAYING INSTRUCTIONS ---\n" +
+            "You are a character in a role-playing scenario. You are NOT an AI assistant or a language tutor.\n" +
+            "Your ONLY job is to play your character authentically.\n" +
+            "**You MUST respond in English.**\n" +
+            "NEVER break character for any reason.\n" +
+            "NEVER mention that this is a role-play, a simulation, or for practice.\n" +
+            "Treat this as a real conversation. Respond naturally based on your character and the situation.\n" +
+            "--- Your Character ---\n" +
+            "Your Role: %s\n" +
+            "User's Role: %s\n" +
+            "Situation: %s\n" +
+            "--- Language Style ---\n" +
+            "Use %s level English vocabulary and sentence structures as part of your natural character speech.",
+            session.getAiRole(),
+            session.getUserRole(),
+            session.getSituation(),
+            session.getDifficultyLevel().name()
         );
     }
 
@@ -371,20 +423,15 @@ public class SpeechSessionService {
         List<ChatMessage> messages = Optional.ofNullable((List<ChatMessage>) redisTemplate.opsForValue().get(getChatHistoryKey(sessionId)))
                                             .orElse(new ArrayList<>());
 
-        // 4. 시스템 메시지 추가 (조건부): 대화 기록이 비어있거나, 첫 번째 메시지가 시스템 메시지가 아닌 경우에만
-        //    AI의 역할, 대화 주제, 난이도를 정의하는 시스템 메시지를 추가합니다. 이는 AI가 맥락을 유지하고 적절한 수준의 영어를 사용하도록 돕습니다.
-        if (messages.isEmpty() || !messages.get(0).getRole().equals(ChatMessageRole.SYSTEM.value())) {
-            String systemPrompt;
-            
-            // 롤 플레잉 세션인지 확인
-            if (session.getTopic().startsWith("role-playing:")) {
-                systemPrompt = generateRolePlayingSystemPrompt(session);
-            } else {
-                systemPrompt = generateRegularSystemPrompt(session);
-            }
-            
-            messages.add(0, new ChatMessage(ChatMessageRole.SYSTEM.value(), systemPrompt));
+        // 4. 시스템 메시지 추가 또는 교체
+        log.info("=== System Prompt Debug ===");
+        log.info("Messages size: {}, isEmpty: {}", messages.size(), messages.isEmpty());
+        if (!messages.isEmpty()) {
+            log.info("First message role: {}", messages.get(0).getRole());
         }
+        log.info("Session topic: {}", session.getTopic());
+        
+        getSystemPrompt(session, messages);
 
         // 5. 사용자의 현재 발화 추가: 변환된 사용자의 텍스트를 대화 기록에 추가합니다.
         messages.add(new ChatMessage(ChatMessageRole.USER.value(), userText));

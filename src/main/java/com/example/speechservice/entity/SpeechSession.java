@@ -46,6 +46,15 @@ public class SpeechSession {
     @Column(name = "end_time")
     private LocalDateTime endTime;
     
+    @Column(name = "ai_role")
+    private String aiRole;
+
+    @Column(name = "user_role")
+    private String userRole;
+
+    @Column(columnDefinition = "TEXT")
+    private String situation;
+
     @Column(columnDefinition = "TEXT")
     private String feedback;
     
