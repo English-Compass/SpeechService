@@ -1,20 +1,40 @@
 services:
+  mysql:
+    image: mysql:8.0
+    container_name: speech-service-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: speechservice
+      MYSQL_USER: speechuser
+      MYSQL_PASSWORD: speechpass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - speech-service-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   speech-service:
     build: .
     container_name: speech-service
     ports:
-      - "8082:8082"
+      - "8083:8083"
     environment:
       - SPRING_PROFILES_ACTIVE=docker
-      - SERVER_PORT=8082
+      - SERVER_PORT=8083
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      # H2 데이터베이스 설정 (인메모리)
-      - SPRING_DATASOURCE_URL=jdbc:h2:mem:testdb
-      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.h2.Driver
-      - SPRING_DATASOURCE_USERNAME=sa
-      - SPRING_DATASOURCE_PASSWORD=
-      - SPRING_H2_CONSOLE_ENABLED=true
-      - SPRING_H2_CONSOLE_PATH=/h2-console
+      # MySQL 데이터베이스 설정
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/speechservice?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      - SPRING_DATASOURCE_DRIVER_CLASS_NAME=com.mysql.cj.jdbc.Driver
+      - SPRING_DATASOURCE_USERNAME=speechuser
+      - SPRING_DATASOURCE_PASSWORD=speechpass
       # JPA 설정
       - SPRING_JPA_HIBERNATE_DDL_AUTO=create-drop
       - SPRING_JPA_SHOW_SQL=true
@@ -23,12 +43,15 @@ services:
       - SPRING_DATA_REDIS_HOST=redis
       - SPRING_DATA_REDIS_PORT=6379
     depends_on:
-      - redis
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - speech-service-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082/api/v1/speech-sessions/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8083/api/v1/speech-sessions/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -48,6 +71,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
+volumes:
+  mysql_data:
 
 networks:
   speech-service-network:
