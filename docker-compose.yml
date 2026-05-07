@@ -3,52 +3,34 @@ services:
     build: .
     container_name: speech-service
     ports:
-      - "8082:8082"
+      - "8085:8080"
+    mem_limit: 512m
+    memswap_limit: 512m
     environment:
+      - JAVA_OPTS=-Xms256m -Xmx512m -XX:+UseG1GC
       - SPRING_PROFILES_ACTIVE=docker
-      - SERVER_PORT=8082
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      # H2 데이터베이스 설정 (인메모리)
+      - SERVER_PORT=8080
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - SPRING_DATASOURCE_URL=jdbc:h2:mem:testdb
       - SPRING_DATASOURCE_DRIVER_CLASS_NAME=org.h2.Driver
       - SPRING_DATASOURCE_USERNAME=sa
       - SPRING_DATASOURCE_PASSWORD=
       - SPRING_H2_CONSOLE_ENABLED=true
       - SPRING_H2_CONSOLE_PATH=/h2-console
-      # JPA 설정
       - SPRING_JPA_HIBERNATE_DDL_AUTO=create-drop
-      - SPRING_JPA_SHOW_SQL=true
-      - SPRING_JPA_PROPERTIES_HIBERNATE_FORMAT_SQL=true
-      # Redis 설정
       - SPRING_DATA_REDIS_HOST=redis
       - SPRING_DATA_REDIS_PORT=6379
-    depends_on:
-      - redis
     networks:
-      - speech-service-network
+      - english-compass-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082/api/v1/speech-sessions/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
 
-  redis:
-    image: redis:7-alpine
-    container_name: speech-service-redis
-    ports:
-      - "6379:6379"
-    networks:
-      - speech-service-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
 networks:
-  speech-service-network:
-    driver: bridge
+  english-compass-network:
+    external: true
+    name: english-compass-network
