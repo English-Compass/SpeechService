@@ -24,7 +24,7 @@ services:
       - english-compass-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/speech-sessions/health"]
       interval: 30s
       timeout: 10s
       retries: 3
