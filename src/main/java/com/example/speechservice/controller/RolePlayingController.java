@@ -21,7 +21,7 @@ import com.example.speechservice.service.SpeechSessionService;
  * 롤 플레잉 관련 API를 처리하는 컨트롤러 클래스입니다.
  */
 @RestController
-@RequestMapping("/api/v1/role-playing")
+@RequestMapping("/role-playing")
 @CrossOrigin(origins = "*")
 public class RolePlayingController {
     

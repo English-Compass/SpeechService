@@ -25,7 +25,7 @@ import com.example.speechservice.service.SpeechSessionService;
  * 음성 세션 시작, 대화 진행 등의 엔드포인트를 제공합니다.
  */
 @RestController
-@RequestMapping("/api/v1/speech-sessions") // 모든 음성 세션 관련 엔드포인트의 기본 경로
+@RequestMapping("/speech-sessions")
 @CrossOrigin(origins = "*") // CORS 허용 (개발 단계에서 모든 출처 허용)
 public class SpeechSessionController {
     
